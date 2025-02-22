@@ -1,0 +1,422 @@
+---
+title: "SCA_SS24_Gruppe204_HA3"
+output:
+  html_document: default
+  pdf_document: default
+date: "2024-06-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+# Laden der Packages
+library(dplyr)
+library(tidyverse)
+library(reshape2)
+library(knitr)
+library(ggplot2)
+library(corrr)
+library(ggcorrplot)
+```
+
+
+** Daten für die Modellierung vorbereiten
+1) Laden Sie die Datensätze externals und services. Erstellen Sie aus gesamten Datensatz services jeweils ein
+Dataframe für Shipping‐ und Warehousing‐Dienstleistungen. Berechnen Sie anschließend für jede durchgeführte
+Dienstleistung die On‐Time‐Delivery Status (d.h. 0 oder FALSE, wenn unpünktlich; 1 oder TRUE wenn pünktlich)
+beziehungsweise die Item Fill Rate (IFR). Stellen Sie anschliessend jeweils die Kennzahlen der durchschnittlichen
+OTD‐Rate und der durchschnittlichen IFR als Kennzahl je Logistikdienstleister aggregiert dar. Geben Sie diese
+Werte in zwei Tabellen aus. Die Tabellen sollen einen einfachen Vergleich der LDL ermöglichen. Bewertungsrel‐
+evant: Output, Code.
+Hinweis: Erneut bietet es sich an, eine Variable Periode dem Datensatz hinzu zu fügen, welche aus Jahr
+und Monat besteht (im Format YYYYMM, z.B. Februar 2019 –> 201902)
+```{r}
+## Laden der Daten
+externals = read.csv2("externals25.csv")
+services = read.csv2("output_services_v0025.csv")
+services$Periode = paste(services$Year, ifelse(services$Month < 10, paste("0", services$Month, sep=""), services$Month), sep="")
+
+
+## Erstellung von Dataframes für Shipping- und Warehousing-Dienstleistungen
+shipping = subset(services, service == "Shipping")
+warehousing = subset(services, service == "Warehousing")
+
+
+## Erstellung des Attributes OnTimeDeliveryStatus bzw. ItemFIllRate für jede Dienstleistung
+shipping$OnTimeDeliveryStatus = with(shipping, ifelse(DaysScheduled >= DaysExecuted, 1, 0))
+warehousing$ItemFillRate = with(warehousing, QExecuted/QScheduled)
+
+
+## Berechnung der durchschnittlichen OTD-Rate und der durchschnittlichen IFR
+# OTD-Rate der Shipping-DL
+shipping_OTD = shipping %>%
+  group_by(vendor) %>%
+  summarise(
+    avg_OTD_Rate = mean(OnTimeDeliveryStatus, na.rm = TRUE)
+  )
+# IFR der Warehousing-DL
+warehousing_IFR = warehousing %>%
+  group_by(vendor) %>%
+  summarise(
+    avg_IFR = mean(ItemFillRate, na.rm = TRUE)
+  )
+
+## Ausgabe der neuen Tabellen zum Vergleich der LDL
+shipping_OTD
+warehousing_IFR
+```
+
+2) Erzeugen Sie ein neues Dataframe, welches die aggregierte IFR je Warehousing‐Logistikdienstleister enthält. Die
+IFR soll je Warehousing‐LDL, Region und Periode (eine Periode = ein Monat eines einzelnen Jahres) aggregiert
+werden. Nehmen Sie kurz Stellung, wie Sie die Qualität dieser Dienstleistungen allgemein einschätzen. Identi‐
+fizieren Sie danach den insgesamt schlechtesten Warehousing‐DL. Geben Sie anschliessend den besten IFR‐Wert
+und die entsprechende Periode aus, den dieser in der Region Japan jemals erreicht hat. Bewertungsrelevant:
+Kommentar, Output, Code.
+```{r}
+## Erzeugung eines aggregrieten Dataframe je Warehousing-LDL, Region, Periode
+warehousing_aggregated = warehousing %>%
+  group_by(vendor, region, Periode) %>%
+  summarise(
+    avg_IFR = mean(ItemFillRate, na.rm = TRUE)
+  )
+
+## Um die Qualität einzuschätzen, ist es notwendig, die allgemine durchschnittliche IFR, die je nur LDL aggregiert ist (bei der obigen Variable warehousing_IFR) zu betrachten. Die IFR, die je LDL, Region und Periode wie bei warehousing_aggregated aggregiert ist, ist nicht dafür nicht vernünftig.
+# Ausgabe des schlechtesten Warehousing-DL mit avg_IFR
+worst_warehousing_vendor = warehousing_IFR[which.min(warehousing_IFR$avg_IFR),]
+cat("Der schlechteste Warehousing-DL ist ", worst_warehousing_vendor$vendor, "mit einem IFR-Wert von ", worst_warehousing_vendor$avg_IFR,"\n")
+
+
+## Ausgabe des besten IFR-Wertes einer Periode  in Japan
+# Filterung der IFR-Werte des schlechtesten WH-DL in Japan
+warehousing_aggregated_jp = subset(warehousing_aggregated, region == "Japan")
+worst_warehousing_vendor_jp = subset(warehousing_aggregated_jp, vendor == worst_warehousing_vendor$vendor)
+# Extraktion der Zeile mit dem besten IFR
+best_IFR = worst_warehousing_vendor_jp[which.max(worst_warehousing_vendor_jp$avg_IFR),]
+cat("Der beste IFR-Wert in Japan von " , best_IFR$vendor, " ist ", best_IFR$avg_IFR, " in der Periode ", best_IFR$Periode, ".")
+```
+
+3) Erzeugen Sie ein neues Dataframe, welches die aggregierte OTD je Shipping‐Logistikdienstleister enthält. Die
+OTD soll je Shipping‐LDL, Region und Periode (eine Periode = ein Monat eines einzelnen Jahres) aggregiert wer‐
+den. Nehmen Sie kurz Stellung, wie Sie die Qualität dieser Dienstleistungen allgemein einschätzen. Geben Sie
+anschliessend den OTD‐Wert (und die entsprechende Periode) aus, den der beste Shipping‐DL im April 2022 in
+der Region Shanghai erreicht hat. Bewertungsrelevant: Output, Code.
+```{r}
+## Erzeugung eines aggregrieten Dataframe je Shipping-LDL, Region, Periode
+shipping_aggregated = shipping %>%
+  group_by(vendor, region, Periode) %>%
+  summarise(
+    avg_OTD = mean(OnTimeDeliveryStatus, na.rm = TRUE)
+  )
+
+
+## Um die Qualität einzuschätzen, ist es notwendig, die allgemine durchschnittliche OTD-Rate, die je nur LDL aggregiert ist (bei der obigen Variable shipping_OTD) zu betrachten. Die OTD-Date, die je LDL, Region und Periode wie bei shipping_aggregated aggregiert ist, ist nicht dafür nicht vernünftig.
+
+
+## Ausgabe des besten IFR-Wertes einer Periode  in Japan
+# Filterung der IFR-Werte in Japan
+shipping_aggregated_sh = subset(shipping_aggregated, region == "Shangh")
+shipping_aggregated_sh_april2022 = subset(shipping_aggregated_sh, Periode == "202204")
+shipping_aggregated_sh_april2022
+# Extraktion der Zeile mit der besten OTD-Rate
+best_shipping_vendor_april2022_sh = shipping_aggregated_sh_april2022[which.max(shipping_aggregated_sh_april2022$avg_OTD),]
+best_shipping_vendor_april2022_sh
+cat("Der beste OTD-Wert ist ", best_shipping_vendor_april2022_sh$avg_OTD, " in der Periode ", best_shipping_vendor_april2022_sh$Periode, " in Shanghai, bei ", best_shipping_vendor_april2022_sh$vendor)
+```
+4) Wählen Sie den Warehousing‐DL “Gifter Warehousing” aus. Vereinigen Sie das eben erzeugte Dataframe
+(genauer: ein Subset dieses Dataframes bezüglich des gewählten Warehousing‐DL) mit den externen Fak‐
+toren der jeweiligen Periode und Region in einem neuen Dataframe. Zeigen Sie davon den Tabellenkopf.
+Bewertungsrelevant: Output.
+Hinweis: In der Funktion merge() können mehrere überschneidende Spalten genutzt werden, indem dem
+“by =”‐Parameter ein Vektor der Spalten übergeben wird. Ihnen steht frei, andere Funktionen zu verwenden.
+```{r}
+# Extraktion der Daten von Gifter Warehousing
+gifter = subset(warehousing_aggregated, vendor == "Gifter Warehousing")
+
+# Erzeugung des Attributes Periode in externals
+externals$Periode = paste(externals$Year, ifelse(externals$Month < 10, paste("0", externals$Month, sep=""), externals$Month), sep="")
+
+# Vereinigung der Dataframes
+gifter_externals = merge(gifter, externals, by = c("region", "Periode"), all = TRUE)
+head(gifter_externals)
+```
+
+5) Sie möchten sich eine Übersicht zu der Korrelation zwischen den externen Faktoren und der IFR des Warehousing‐
+Dienstleister schaffen. Führen Sie dazu die folgenden Schritte aus:
+(a) Geben Sie eine unsortierte Tabelle aus, in der die externen Effekte und deren Korrelation zur IFR abgebildet
+sind.
+(b) Geben Sie eine Tabelle aus, in der die 5 am stärksten zur IFR korrelierenden externen Effekten und deren
+Korrelation zur IFR abgebildet sind. Wie bewerten Sie die Korrelation zwischen diesen 5 Faktoren und der
+IFR?
+(c) Erstellen Sie ein Korrelations‐Plot für diese 5 externen Faktoren. Bewertungsrelevant: Kommentar, Output.
+```{r}
+## (a) Externe Faktoren und deren Korrelation zur IFR anzeigen
+# Berechnung der Korrelationen von den Faktoren zur IFR
+correlations <- cor(gifter_externals %>% select_if(is.numeric), use = "complete.obs")
+correlations_df <- as.data.frame(as.table(correlations)) %>%
+  filter(Var1 == "avg_IFR" & Var2 != "avg_IFR") %>%
+  select(Var2, Freq) %>%
+  rename(Factor = Var2, Correlation = Freq)
+kable(correlations_df, caption = "Externen Faktoren und deren Korrelation zur IFR")
+
+## (b) Top 5 Faktoren mit der höchsten Korrelation auswählen und anzeigen
+top5_correlations <- correlations_df %>%
+  arrange(desc(abs(Correlation))) %>%
+  head(5)
+kable(top5_correlations, caption = "Die 5 am stärksten zur IFR korrelierenden externen Effekten")
+
+
+## (c) Korrelationen für die Top 5 Faktoren visualisieren
+# Baseline hesaplama (ort. IFR)
+# Extraktion der 5 Faktoren
+correlation_data <- gifter_externals %>%
+  select(all_of(top5_correlations$Factor), avg_IFR)
+# Berechnung der Korrelationen zwischen den Faktoren und der IFR
+correlation_matrix <- cor(correlation_data, use = "complete.obs")
+correlation_melt <- melt(correlation_matrix)
+# Visualisierung der Korrelationen
+ggplot(data = correlation_melt, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "blue", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name = "Correlation") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 12, hjust = 1)) +
+  coord_fixed() +
+  labs(title = "Korrelations-Plot der 5 stärksten externen Faktoren und der IFR")
+
+```
+
+6) Sie möchten nun eine Lineare Regression durchführen, um die IFR mit Hilfe der externen Effekte vorherzusagen.
+Um die Güte Ihrer Modelle vergleichen zu können, benötigen Sie eine geeignete Baseline. Erzeugen Sie eine sin‐
+nvolle Baseline in dem Dataframe zu Ihrem gewählten Warehousing‐DL in einer Variable Baseline. Begründen
+Sie Ihre Wahl. Geben Sie von dem DataFrame den Tabellenkopf aus. Geben Sie Sie nur die Spalten ‘Periode’,
+‘Region’, ‘IFR’ und ‘Baseline’ aus. Bewertungsrelevant: Output, Begründung.
+```{r}
+## Durchschnittliche IFR als Baseline ausgewählt, da sie den zentralen Tendenz der vorhandenen Daten repräsentiert und einen einfachen Referenzpunkt vor der Erstellung eines komplexen Modells bietet. So kann die durchschnittliche Leistung des erstellten Modells im Vergleich zu dieser zentralen Tendenz bewertet werden. Der Durchschnittswert ist oft eine der einfachsten und effektivsten Metriken, um das allgemeine Verhalten der Daten zusammenzufassen.
+# Berechnung des historischen Durchschnitts-IFR als Baseline
+historical_avg_IFR <- mean(gifter_externals$avg_IFR, na.rm = TRUE)
+# Hinzufügen der Baseline-Spalte zum DataFrame
+gifter_externals <- gifter_externals %>%
+  mutate(Baseline = historical_avg_IFR)
+# Ausgabe der relevanten Spalten
+gifter_baseline_output <- gifter_externals %>%
+  select(Periode, region, avg_IFR, Baseline)
+# Ausgabe des Tabellenkopfs
+head(gifter_baseline_output)
+```
+
+7) Visualisieren Sie die Baseline Ihres gewählten LDL für den Zeitraum von 2019 bis 2023 sowie die IFR in der Region
+Shanghai und die IFR in der Region Peking Bewertungsrelevant: Output.
+```{r}
+# Filtern der Daten für die Regionen Shanghai und Peking
+gifter_shanghai_peking <- gifter_externals %>%
+  filter(region %in% c("Shangh", "Peking") & Periode >= 201901 & Periode <= 202312)
+
+# Visualisierung der Baseline und IFR-Werte für Shanghai und Peking
+ggplot(gifter_shanghai_peking, aes(x = Periode, group = region)) +
+  geom_line(aes(y = avg_IFR, color = region), size = 1) +
+  geom_line(aes(y = Baseline, color = "Baseline"), linetype = "dashed", size = 1) +
+  labs(title = "IFR und Baseline in Shanghai und Peking (2019-2023) bei Gifter Warehousing",
+       x = "Periode",
+       y = "IFR",
+       color = "Legende") +
+  scale_color_manual(values = c("Shangh" = "blue", "Peking" = "red", "Baseline" = "green")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+8) Bewerten Sie die Baseline für Ihren gewählten Warehousing‐Logistikdienstleister nach MAE und MAPE und spe‐
+ichern Sie diese in einem Dataframe (z.B. “evaluation”) ab. Dieses Dataframe soll später auch für die Bewertung
+der Regressionsmodelle genutzt werden. Fügen Sie zudem auch eine Spalte für das Bestimmtheitsmass (R²)
+sowie das adjustierte Bestimmtheitsmass (adj. R²) hinzu, welche im Falle der Baseline 0 sein können. Bewer‐
+tungsrelevant: Output.
+```{r}
+# Berechnung von MAE und MAPE
+baseline_mae = mean(abs(gifter_externals$avg_IFR - gifter_externals$Baseline), na.rm = TRUE)
+baseline_mape = mean(abs((gifter_externals$avg_IFR - gifter_externals$Baseline)/gifter_externals$avg_IFR)*100, na.rm = TRUE)
+
+# Erstellung des neuen Dataframes zur Speicherung von MAE und MAPE
+evaluation = data.frame(
+  Model = "Baseline",
+  MAE = baseline_mae,
+  MAPE = baseline_mape,
+  R2 = 0, 
+  adj_R2 = 0
+)
+evaluation
+
+```
+
+9) Teilen Sie das Dataframe Ihres gewählten Warehousing‐Logistikdienstleisters in ein Trainings‐ (80%) und ein Test‐
+Set (20%) auf. Geben Sie von beiden den Tabellenkopf aus. Setzen Sie vorher den Seed 4141. Bewertungsrele‐
+vant: Code, Output.
+```{r}
+# Seed 4141 für Reproduzierbarkeit
+set.seed(4141)
+
+# Aufteilung der Daten in Trainings- (80%) und Test-Set (20%)
+sample_size <- floor(0.8 * nrow(gifter_externals))
+train_indices <- sample(seq_len(nrow(gifter_externals)), size = sample_size)
+train_set <- gifter_externals[train_indices, ]
+test_set <- gifter_externals[-train_indices, ]
+
+# Ausgabe der Tabellenköpfe
+head(train_set)
+head(test_set)
+```
+
+10) Wenden Sie die Forward Selection Variante der Wrapper Methode an (siehe Vorlesung). D.h. erstellen Sie
+zunächst alle uni‐variaten Modelle, bewerten Sie diese Modelle und wählen Sie das Modell mit der besten Bew‐
+ertung aus. Erstellen Sie ‐ basierend auf dem besten Modell der ersten Iteration ‐ alle bi‐variaten Modelle (das
+Modell der vorherigen Wrapper‐Iteration wird jeweils um eine Variable erweitert), bewerten Sie diese Modelle
+und wählen Sie das Modell mit der besten Bewertung aus. Führen Sie dies so lange fort, bis keine Verbesserung
+mehr erreicht wird. Nutzen Sie zur Modellierung die lineare Regression. Bewerten Sie die Modelle entsprechend
+nach MAE und MAPE sowie nach regressionsspezifischen Kennzahlen. Nutzen Sie nur die 5 externen Faktoren
+als Features, die Sie oben als am stärksten korrelierende externe Faktoren identifiziert haben. Kommentieren Sie
+Ihr Vorgehen zwischen den Iterationen. Bewertungsrelevant: Output, Vorgehen (einschliesslich Kommentare).
+Hinweis: Tritt eine starke Multikollinearität (“strong multicollinearity”) auf, so können Sie alle Modellierun‐
+gen mit der entsprechenden Variablen‐Kombination unter Bezug auf diesen Hinweis auslassen (siehe Vor‐
+lesungsinhalte zu Korrelation).
+Hinweis 2: Für das Erstellen der Modelle reicht es aus, zunaechst die Trainings‐Daten zu nutzen. Über‐
+prüfen Sie ihr endgültiges Modell jedoch am Ende auf Overfitting, indem Sie die Test‐Daten nutzen!
+Hinweis 3: Sie müssen kein Feature Engineering betreiben. Sie müssen auch nicht die Residuenplots über‐
+prüfen.
+```{r}
+results = data.frame(Model = character(), MAE = numeric(), MAPE = numeric(), stringsAsFactors = FALSE)
+## Erstellung und Bewertung univariater Modelle
+for (e_factor in top5_correlations$Factor) {
+  formula = as.formula(paste("avg_IFR~", e_factor))
+  model = lm(formula, data = train_set)
+  predictions = predict(model, test_set)
+  mae = mean(abs(test_set$avg_IFR - predictions), na.rm = TRUE)
+  mape = mean(abs((test_set$avg_IFR - predictions)/test_set$avg_IFR)*100, na.rm = TRUE)
+  results = rbind(results, data.frame(Model = e_factor, MAE = mae, MAPE = mape))
+}
+# Ausgabe der MAE und MAPE der Modelle
+results
+# Von den Ergebnissen stellt man fest, dass der Faktor "PoliticalStability" den kleinsten MAE und den kleinsten MAPE hat und somit das beste Modell ist.
+best_univariate = results[which.min(results$MAE), ]
+print(best_univariate)
+
+bi_results = data.frame(Model = character(), MAE = numeric(), MAPE = numeric(), stringsAsFactors = FALSE)
+## Erstellung und Bewertung bivariater Modelle
+for (e_factor in setdiff(top5_correlations$Factor, best_univariate$Model)) {
+  formula = as.formula(paste("avg_IFR~", best_univariate$Model, "+", e_factor))
+  model = lm (formula, data = train_set)
+  predictions = predict(model, test_set)
+  mae = mean(abs(test_set$avg_IFR - predictions), na.rm = TRUE)
+  mape = mean(abs((test_set$avg_IFR - predictions)/test_set$avg_IFR)*100, na.rm = TRUE)
+  bi_results = rbind(bi_results, data.frame(Model = paste("PoliticalStability + ", e_factor), MAE = mae, MAPE = mape))
+}
+# Ausgabe der MAE und MAPE der Modelle
+
+# Von den Ergebnissen stellt man fest, dass "PoliticalStability + UnskilledLaborAvailability" den kleinsten MAE und kleinsten MAPE hat und somit das beste Modell ist
+best_bivariate = bi_results[which.min(bi_results$MAE), ]
+best_bivariate
+
+## Erweiterung des besten bivariaten Modells bis keine Verbesserung mehr erreicht wird
+# Funktion zur Iteration der Modellbildung
+fw_selection = function(current_model, remaining_factors) {
+  improved = TRUE
+  while(improved) {
+    improved = FALSE
+    current_best = current_model
+    for(e_factor in setdiff(remaining_factors, unlist(strsplit(current_model, " \\+")))) {
+      formula = as.formula(paste("avg_IFR~", current_model, "+", e_factor))
+      model = lm(formula, data = train_set)
+      predictions = predict(model, test_set)
+      mae = mean(abs(test_set$avg_IFR - predictions), na.rm = TRUE)
+      mape = mean(abs((test_set$avg_IFR - predictions)/test_set$avg_IFR)*100, na.rm = TRUE)
+      if(mae < min(results$MAE)) {
+        current_best = paste(current_model, "+", e_factor)
+        results = rbind(results, data.frame(Model = current_best, MAE = mae, MAPE = mape))
+        improved = TRUE
+      }
+    }
+    current_model = current_best
+  }
+  return(current_model)
+}
+# Bestimmung des besten Modells
+best_model = fw_selection(best_bivariate$Model, top5_correlations$Factor)
+print(paste("Best Model: ", best_model))
+
+## Erstellung und Bewertung finales Modells
+final_formula = as.formula(paste("avg_IFR~", best_model))
+best_model = lm(final_formula, data = train_set)
+final_predictions = predict(best_model, test_set)
+final_mae = mean(abs(test_set$avg_IFR - final_predictions), na.rm = TRUE)
+final_mape = mean(abs((test_set$avg_IFR - final_predictions)/test_set$avg_IFR)*100, na.rm = TRUE)
+print(paste("Best model with einem MAE von ", final_mae, " und MAPE von ", final_mape))
+# Überprüfung auf Overfitting
+train_predictions = predict(best_model, train_set)
+train_mae = mean(abs(train_set$avg_IFR - train_predictions), na.rm = TRUE)
+train_mape = mean(abs((train_set$avg_IFR - train_predictions)/train_set$avg_IFR)*100, na.rm = TRUE)
+print(paste("Overfitting-Prüfung: MAE ist ", train_mae, " und MAPE ist ", train_mape))
+```
+11) Bewerten Sie ihr Modell quantitativ im Vergleich mit der Baseline. Bewertungsrelevant: Output, Kommentar.
+```{r}
+## Ausgabe der Modellbewertung
+evaluation = rbind(evaluation, data.frame(Model = "Best Model", MAE = final_mae, MAPE = final_mape, R2 = summary(best_model)$r.squared, adj_R2 = summary(best_model)$adj.r.squared))
+evaluation
+
+## Bewertung:
+# Das beste Modell hat einen deutlich niedrigeren MAE (0.0011 im Vergleich zu 0.0281), was bedeutet, dass beim besten Modell die Abweichungen zwischen den tatsächlichen und vorhergesagten Werten kleiner ist als bei der Baseline.
+# Das beste Modell hat einen viel kleineren MAPE (1.3564 im Vergleich zu 3.3726), was zeigt, dass das Modell die Vorhersagen prozentual genauer trifft.
+# Ein höheres R2 von dem Modell (0.844 vs 0) weist darauf hin, dass es offensichtlich mehr Variabilität in den Daten erklärt.
+# Das adjustierte R² von dem Modell beträgt 0.8420, was nahe am R2 liegt und zeigt, dass das Modell auch nach Berücksichtigung der Anzahl der Prädiktoren robust bleibt. Währendessen ist das adjustierte R2 bei der Baseline auch 0.
+```
+12) Ihre Chefin kommt auf der Firmenfeier zu Ihnen und schlägt Ihnen eine Wette vor. Sie sagt: “Ich wette mit
+Ihnen, dass die durchschnittliche IFR des oben betrachteten WH‐DL im April 2024 in Japan höher sein wird, als
+in Shanghai. Sollte dies nicht der Fall sein, gebe ich Ihnen 400 Euro. Habe ich jedoch Recht, müssen Sie mir die
+400 Euro geben.” Sollten Sie die Wette eingehen? Bewertungsrelevant: Output, Kommentar.
+Entscheidung
+```{r}
+# Extraktion der externen Faktoren des besten Modells
+gifter_topfactors = gifter_externals %>% select(region, Periode, avg_IFR, PoliticalStability,  UnskilledLaborAvailability, Inflation)
+
+# Vorhersage der IFR mit dem besten Modell
+gifter_topfactors$predicted_IFR <- predict(best_model, newdata = gifter_topfactors)
+
+# Extrakation der Vorhersagen für April 2024
+gifter_topfactors_042024 = subset(gifter_topfactors, Periode == "202404")
+
+
+# Extraktion der Vorhersagen für Japan und Shanghai
+gifter_japan_042024 <- gifter_topfactors_042024$predicted_IFR[gifter_topfactors_042024$region == "Japan"]
+gifter_shangh_042024 <- gifter_topfactors_042024$predicted_IFR[gifter_topfactors_042024$region == "Shangh"]
+# Ausgabe der IFR im April 2024 in beiden Regionen
+print(paste("IFR in Japan im April 2024 wäre ", gifter_japan_042024))
+print(paste("IFR in Shanghai im April 2024 wäre ", gifter_shangh_042024))
+
+# Im April 2024 scheint die IFR in Japan höher zu sein als in Shanghai. Daher hätte die Chefin Recht, weswegen ich die Wette nicht eingehen sollte.
+```
+
+13) Ihr Regressionsmodell soll im kommenden Jahr implementiert und langfristig in die Unternehmensprozesse in‐
+tegriert werden. Beschreiben Sie, welche Nutzer und Prozesse davon profitieren könnten und in welcher Form
+die Lösung bereitgestellt werden könnte. Nehmen Sie ausserdem ausführlich zur Phase der Datenbeschaffung
+Stellung. Bewertungsrelevant: Kommentar.
+```{r}
+## Nutzer und Prozesse, die davon profitieren könnten
+# Das Modell kann dabei helfen, die Nachfrage besser vorherzusagen. Damit werden Logistikmanager und -analysten bei der Planung der Lagerbestände und Lieferungen zur Verbesserung der OTD und IFR.
+# Genauere Vorhersagen der IFR können Finanzanalysten und Controller bei der Finanzplanung und Vermeidung unnötiger Kosten.
+# Die Vorhersage der IFR kann die Vertriebsmanager bei der Planung von Verkaufsaktionen und Marketingkampagnen, um zu gewährleisten, dass genügend Produkte verfügbar sind.
+# Ein stabiler Lagerbestand und punktliche Lieferungen führen zu höherer Kundenzufriedenheit und weniger Beschwerden, wovon die Kundenservicemitarbeiter profitieren.
+
+
+## Form der Lösungsbereitstellung
+# Ein interaktives Dashboard, das Echtzeit-Analysen und Vorhersagen anzeigt, wo Nutzer wichtige Kennzahlen wie OTD und IFR sowie externe Faktoren sehen.
+# Eine API, die Vorhersagen bereitstellt, damit Mitarbeiter die Vorhersagen betrachten und damit optimale Entscheidungen treffen können.
+# Regelmäßige Berichte (z.B per E-mail), die an Mitarbeiter gesendet werden, um sie über Vorhersagen und Trends zu informieren.
+
+
+## Datenbeschaffung
+# Identifkation der Datenquellen, einschließlich internen Datenquellen (Lagerbestände, Lieferzeiten, Bestellungen usw.) und externen Datenquellen (politische Stabilität, Wetter usw.)
+# Datenintegration und -bereinigung: Integration der Datenquellen in ein Data Warehouse und Bereinigung der Daten.
+# Datenverarbeitung und -vorbereitung: Transformation der Daten in ein geeignetes Format für die Modellierung und ggf. Feature Engineering
+# Datenaktualisierung und -überwachung: Regelmäßige Aktualisierung  der Daten sowie die Überwachung der Datenqualität zur Problemerkennung
+
+```
+
